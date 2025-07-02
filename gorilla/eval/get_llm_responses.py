@@ -57,7 +57,7 @@ def get_response(get_response_input, api_key, api_base=None):
     question = encode_question(question, api_name)
     
     try:
-        if "gpt" in model:
+        if True:
             openai.api_key = api_key
             if api_base:
                 openai.api_base = api_base
@@ -86,22 +86,17 @@ def get_response(get_response_input, api_key, api_base=None):
     print("=>",)
     return {'text': response, "question_id": question_id, "answer_id": "None", "model_id": model, "metadata": {}}
 
-def process_entry(entry, api_key, api_base=None):
+def process_entry(entry, api_key, api_base=None, output_file=None):
+    global file_write_lock
     question, question_id, api_name, model = entry
     result = get_response((question, question_id, api_name, model), api_key, api_base)
-    wandb.log({"question_id_completed":question_id})
-    return result
-
-def write_result_to_file(result, output_file):
-    global file_write_lock
-    with file_write_lock:
-        with open(output_file, "a") as outfile:
-            json.dump(result, outfile)
-            outfile.write("\n")
-
-def callback_with_lock(result, output_file):
-    global file_write_lock
-    write_result_to_file(result, output_file, file_write_lock)
+    #wandb.log({"question_id_completed":question_id})
+    print("Finished")
+    with open(output_file, "a") as outfile:
+        json.dump(result, outfile)
+        outfile.write("\n")
+    print("Writing Finished")
+    return result   
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -114,6 +109,7 @@ if __name__ == '__main__':
     parser.add_argument("--wandb_project", type=str, default="gorilla-api", help="Weights & Biases project name")
     parser.add_argument("--wandb_entity", type=str, default=None, help="Weights & Biases entity name")
     parser.add_argument("--openai_api_base", type=str, default=None, help="Optional base URL for OpenAI-compatible API (e.g. http://ki.uni-leipzig.de/api/v1)")
+    parser.add_argument("--parallel", type=int, default=1, help="The number of concurrent API calls.")
     args = parser.parse_args()
 
     if args.use_wandb:
@@ -142,14 +138,13 @@ if __name__ == '__main__':
         os.remove(args.output_file)
 
     file_write_lock = mp.Lock()
-    with mp.Pool(1) as pool:
+    with mp.Pool(processes=args.parallel) as pool:
         results = []
         for idx, (question, question_id) in enumerate(zip(questions, question_ids)):
             result = pool.apply_async(
                 process_entry,
                 args=((question, question_id, args.api_name, args.model), 
-                    args.api_key, args.openai_api_base),
-                callback=lambda result: write_result_to_file(result, args.output_file),
+                    args.api_key, args.openai_api_base, args.output_file),
             )
             results.append(result)
         pool.close()
