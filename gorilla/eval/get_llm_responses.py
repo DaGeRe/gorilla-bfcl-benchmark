@@ -52,13 +52,15 @@ def encode_question(question, api_name):
     return prompts
 
 @retry(wait=wait_exponential(multiplier=1, min=10, max=120), reraise=True)
-def get_response(get_response_input, api_key):
+def get_response(get_response_input, api_key, api_base=None):
     question, question_id, api_name, model = get_response_input
     question = encode_question(question, api_name)
     
     try:
         if "gpt" in model:
             openai.api_key = api_key
+            if api_base:
+                openai.api_base = api_base
             responses = openai.ChatCompletion.create(
                 model=model,
                 messages=question,
@@ -84,9 +86,9 @@ def get_response(get_response_input, api_key):
     print("=>",)
     return {'text': response, "question_id": question_id, "answer_id": "None", "model_id": model, "metadata": {}}
 
-def process_entry(entry, api_key):
+def process_entry(entry, api_key, api_base=None):
     question, question_id, api_name, model = entry
-    result = get_response((question, question_id, api_name, model), api_key)
+    result = get_response((question, question_id, api_name, model), api_key, api_base)
     wandb.log({"question_id_completed":question_id})
     return result
 
@@ -111,6 +113,7 @@ if __name__ == '__main__':
     parser.add_argument("--use_wandb", action='store_true', help="pass this argument to turn on Weights & Biases logging of the LLM responses")
     parser.add_argument("--wandb_project", type=str, default="gorilla-api", help="Weights & Biases project name")
     parser.add_argument("--wandb_entity", type=str, default=None, help="Weights & Biases entity name")
+    parser.add_argument("--openai_api_base", type=str, default=None, help="Optional base URL for OpenAI-compatible API (e.g. http://ki.uni-leipzig.de/api/v1)")
     args = parser.parse_args()
 
     if args.use_wandb:
@@ -144,7 +147,8 @@ if __name__ == '__main__':
         for idx, (question, question_id) in enumerate(zip(questions, question_ids)):
             result = pool.apply_async(
                 process_entry,
-                args=((question, question_id, args.api_name, args.model), args.api_key),
+                args=((question, question_id, args.api_name, args.model), 
+                    args.api_key, args.openai_api_base),
                 callback=lambda result: write_result_to_file(result, args.output_file),
             )
             results.append(result)
